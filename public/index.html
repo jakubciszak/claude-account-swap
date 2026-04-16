@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>cswap — Multi-Account Switcher for Claude Code</title>
+  <meta name="description" content="Rotate between multiple Claude Code accounts without logging out. Real-time usage stats, macOS Keychain integration, zero dependencies.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0a0a0b;
+      --bg-card: #111113;
+      --bg-code: #16161a;
+      --border: #1e1e24;
+      --text: #e4e4e7;
+      --text-muted: #71717a;
+      --accent: #d4856a;
+      --accent-glow: rgba(212, 133, 106, 0.15);
+      --accent-hover: #e09a82;
+      --green: #4ade80;
+      --radius: 12px;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .noise {
+      position: fixed;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .glow-orb {
+      position: fixed;
+      width: 600px;
+      height: 600px;
+      border-radius: 50%;
+      background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+      top: -200px;
+      right: -100px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .container {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 0 24px;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* Nav */
+    nav {
+      padding: 20px 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .logo {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    .nav-links {
+      display: flex;
+      gap: 24px;
+      list-style: none;
+    }
+
+    .nav-links a {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+
+    .nav-links a:hover { color: var(--text); }
+
+    /* Hero */
+    .hero {
+      padding: 100px 0 80px;
+      text-align: center;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 6px 14px;
+      border-radius: 100px;
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 28px;
+      font-weight: 500;
+    }
+
+    .badge span { color: var(--green); }
+
+    h1 {
+      font-size: clamp(40px, 6vw, 60px);
+      font-weight: 700;
+      line-height: 1.1;
+      letter-spacing: -0.03em;
+      margin-bottom: 20px;
+    }
+
+    h1 em {
+      font-style: normal;
+      color: var(--accent);
+    }
+
+    .subtitle {
+      font-size: 18px;
+      color: var(--text-muted);
+      max-width: 520px;
+      margin: 0 auto 40px;
+      line-height: 1.7;
+    }
+
+    .cta-group {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 24px;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s;
+      border: none;
+      cursor: pointer;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #0a0a0b;
+    }
+
+    .btn-primary:hover {
+      background: var(--accent-hover);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 24px var(--accent-glow);
+    }
+
+    .btn-secondary {
+      background: var(--bg-card);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    .btn-secondary:hover {
+      border-color: #2e2e36;
+      transform: translateY(-1px);
+    }
+
+    .btn svg {
+      width: 18px;
+      height: 18px;
+    }
+
+    /* Terminal */
+    .terminal-section {
+      padding: 0 0 80px;
+    }
+
+    .terminal {
+      background: var(--bg-code);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.4);
+    }
+
+    .terminal-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(255,255,255,0.02);
+    }
+
+    .terminal-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+
+    .terminal-dot:nth-child(1) { background: #ff5f57; }
+    .terminal-dot:nth-child(2) { background: #febc2e; }
+    .terminal-dot:nth-child(3) { background: #28c840; }
+
+    .terminal-title {
+      flex: 1;
+      text-align: center;
+      font-size: 13px;
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .terminal-body {
+      padding: 20px 24px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13.5px;
+      line-height: 1.8;
+      overflow-x: auto;
+    }
+
+    .terminal-body .prompt { color: var(--accent); }
+    .terminal-body .cmd { color: var(--text); }
+    .terminal-body .output { color: var(--text-muted); }
+    .terminal-body .hl { color: var(--accent); }
+    .terminal-body .green { color: var(--green); }
+    .terminal-body .dim { color: #52525b; }
+
+    /* Features */
+    .features {
+      padding: 80px 0;
+    }
+
+    .section-label {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--accent);
+      margin-bottom: 12px;
+    }
+
+    h2 {
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 48px;
+    }
+
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+    }
+
+    .feature-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px;
+      transition: border-color 0.2s, transform 0.2s;
+    }
+
+    .feature-card:hover {
+      border-color: #2e2e36;
+      transform: translateY(-2px);
+    }
+
+    .feature-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      background: var(--accent-glow);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 16px;
+      font-size: 20px;
+    }
+
+    .feature-card h3 {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .feature-card p {
+      font-size: 14px;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+
+    /* Install */
+    .install {
+      padding: 80px 0;
+    }
+
+    .install-steps {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .install-step {
+      display: flex;
+      gap: 20px;
+      align-items: flex-start;
+    }
+
+    .step-num {
+      width: 36px;
+      height: 36px;
+      min-width: 36px;
+      border-radius: 50%;
+      background: var(--accent-glow);
+      color: var(--accent);
+      font-weight: 700;
+      font-size: 15px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 2px;
+    }
+
+    .step-content h3 {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+
+    .step-content p {
+      font-size: 14px;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+
+    .code-block {
+      background: var(--bg-code);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 18px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      color: var(--text);
+      overflow-x: auto;
+      position: relative;
+    }
+
+    .code-block .comment { color: #52525b; }
+
+    /* Platforms */
+    .platforms {
+      padding: 80px 0;
+    }
+
+    .platform-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+    }
+
+    .platform-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      text-align: center;
+      transition: border-color 0.2s;
+    }
+
+    .platform-card:hover { border-color: #2e2e36; }
+
+    .platform-card .os {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .platform-card .arch {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* Footer */
+    footer {
+      padding: 40px 0;
+      border-top: 1px solid var(--border);
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+
+    footer a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    footer a:hover { text-decoration: underline; }
+
+    @media (max-width: 600px) {
+      .hero { padding: 60px 0 50px; }
+      .features, .install, .platforms { padding: 50px 0; }
+      .install-step { flex-direction: column; gap: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="noise"></div>
+  <div class="glow-orb"></div>
+
+  <div class="container">
+    <nav>
+      <a href="#" class="logo">cswap</a>
+      <ul class="nav-links">
+        <li><a href="#features">Features</a></li>
+        <li><a href="#install">Install</a></li>
+        <li><a href="https://github.com/jakubciszak/claude-account-swap">GitHub</a></li>
+      </ul>
+    </nav>
+
+    <!-- Hero -->
+    <section class="hero">
+      <div class="badge"><span>&#9679;</span> Open Source &middot; MIT License</div>
+      <h1>Switch Claude Code<br>accounts <em>instantly</em></h1>
+      <p class="subtitle">
+        Rotate between multiple Claude Code accounts without logging out.
+        Real-time usage stats, secure credential storage, zero dependencies.
+      </p>
+      <div class="cta-group">
+        <a href="https://github.com/jakubciszak/claude-account-swap/releases" class="btn btn-primary">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download
+        </a>
+        <a href="https://github.com/jakubciszak/claude-account-swap" class="btn btn-secondary">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+          GitHub
+        </a>
+      </div>
+    </section>
+
+    <!-- Terminal Demo -->
+    <section class="terminal-section">
+      <div class="terminal">
+        <div class="terminal-header">
+          <div class="terminal-dot"></div>
+          <div class="terminal-dot"></div>
+          <div class="terminal-dot"></div>
+          <span class="terminal-title">cswap --list</span>
+        </div>
+        <div class="terminal-body">
+          <div><span class="output">Accounts:</span></div>
+          <div><span class="output">  1: alice@company.com </span><span class="dim">[Acme Corp]</span> <span class="hl">(active)</span></div>
+          <div><span class="output">     </span><span class="dim">&#9500;</span><span class="output"> 5h:  32%   resets 14:30        in 2h 15m</span></div>
+          <div><span class="output">     </span><span class="dim">&#9492;</span><span class="output"> 7d:  18%   resets Apr 20 09:00 in 3d 22h</span></div>
+          <div>&nbsp;</div>
+          <div><span class="output">  2: alice@personal.dev </span><span class="dim">[personal]</span></div>
+          <div><span class="output">     </span><span class="dim">&#9500;</span><span class="output"> 5h:  87%   resets 15:45        in 3h 30m</span></div>
+          <div><span class="output">     </span><span class="dim">&#9492;</span><span class="output"> 7d:  41%   resets Apr 19 12:00 in 2d 23h</span></div>
+          <div>&nbsp;</div>
+          <div><span class="prompt">$ </span><span class="cmd">cswap --switch</span></div>
+          <div><span class="hl">Switched to</span><span class="output"> Account-2 (alice@personal.dev)</span></div>
+          <div><span class="green">&#10003;</span><span class="output"> Please restart Claude Code to use the new authentication.</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Features -->
+    <section class="features" id="features">
+      <div class="section-label">Features</div>
+      <h2>Everything you need</h2>
+      <div class="feature-grid">
+        <div class="feature-card">
+          <div class="feature-icon">&#8644;</div>
+          <h3>Instant Switching</h3>
+          <p>Rotate between unlimited Claude Code accounts. Switch by number or email in a single command.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#9776;</div>
+          <h3>Usage Stats</h3>
+          <p>Real-time 5-hour and 7-day utilization with reset countdowns. Know exactly when your limits refresh.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#128274;</div>
+          <h3>Secure Storage</h3>
+          <p>macOS Keychain integration. File-based storage with 0600 permissions on Linux and WSL.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#127970;</div>
+          <h3>Org Support</h3>
+          <p>Manage personal and organization accounts side by side. Same email, different orgs? No problem.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#9100;</div>
+          <h3>Safe Rollback</h3>
+          <p>All switch operations use file locking and transaction rollback. If anything fails, nothing changes.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#9889;</div>
+          <h3>Zero Dependencies</h3>
+          <p>Single static binary. No runtime, no frameworks, no package managers. Just download and run.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Install -->
+    <section class="install" id="install">
+      <div class="section-label">Get Started</div>
+      <h2>Up and running in 60 seconds</h2>
+      <div class="install-steps">
+        <div class="install-step">
+          <div class="step-num">1</div>
+          <div class="step-content">
+            <h3>Download the binary</h3>
+            <p>Grab the latest release for your platform.</p>
+            <div class="code-block">
+              <span class="comment"># macOS Apple Silicon</span><br>
+              curl -Lo cswap https://github.com/jakubciszak/claude-account-swap/releases/latest/download/cswap-darwin-arm64<br>
+              chmod +x cswap && mv cswap ~/.local/bin/
+            </div>
+          </div>
+        </div>
+        <div class="install-step">
+          <div class="step-num">2</div>
+          <div class="step-content">
+            <h3>Add your accounts</h3>
+            <p>Log into Claude Code with each account and register it.</p>
+            <div class="code-block">
+              <span class="comment"># Log in with account 1, then:</span><br>
+              cswap --add-account<br><br>
+              <span class="comment"># Log out, log in with account 2, then:</span><br>
+              cswap --add-account
+            </div>
+          </div>
+        </div>
+        <div class="install-step">
+          <div class="step-num">3</div>
+          <div class="step-content">
+            <h3>Switch away</h3>
+            <p>Rotate to the next account or jump to a specific one.</p>
+            <div class="code-block">
+              cswap --switch<br>
+              cswap --switch-to user@example.com<br>
+              cswap --list
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Platforms -->
+    <section class="platforms">
+      <div class="section-label">Platforms</div>
+      <h2>Pre-built binaries</h2>
+      <div class="platform-grid">
+        <a href="https://github.com/jakubciszak/claude-account-swap/releases/latest/download/cswap-darwin-arm64" class="platform-card">
+          <div class="os">macOS</div>
+          <div class="arch">Apple Silicon (arm64)</div>
+        </a>
+        <a href="https://github.com/jakubciszak/claude-account-swap/releases/latest/download/cswap-darwin-amd64" class="platform-card">
+          <div class="os">macOS</div>
+          <div class="arch">Intel (amd64)</div>
+        </a>
+        <a href="https://github.com/jakubciszak/claude-account-swap/releases/latest/download/cswap-linux-amd64" class="platform-card">
+          <div class="os">Linux</div>
+          <div class="arch">x86_64 (amd64)</div>
+        </a>
+        <a href="https://github.com/jakubciszak/claude-account-swap/releases/latest/download/cswap-linux-arm64" class="platform-card">
+          <div class="os">Linux</div>
+          <div class="arch">ARM64</div>
+        </a>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+      <p>
+        MIT License &middot;
+        <a href="https://github.com/jakubciszak/claude-account-swap">Source Code</a> &middot;
+        <a href="https://github.com/jakubciszak/claude-account-swap/releases">Releases</a> &middot;
+        <a href="https://github.com/jakubciszak/claude-account-swap/issues">Issues</a>
+      </p>
+    </footer>
+  </div>
+</body>
+</html>
